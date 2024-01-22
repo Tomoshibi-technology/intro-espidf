@@ -1,41 +1,40 @@
 #include <stdio.h>
-#include "sdkconfig.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_chip_info.h"
-#include "esp_flash.h"
+#include <driver/i2s_std.h>
 
-void app_main() {
-    printf("Hello world!\n");
+void app_main(void)
+{
+		i2s_chan_config_t channel_config = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
+		i2s_chan_handle_t tx_channel_handle;
+		ESP_ERROR_CHECK(i2s_new_channel(&channel_config, &tx_channel_handle, NULL /* rx_handle */));
 
-    /* Print chip information */
-    esp_chip_info_t chip_info;
-    uint32_t flash_size;
-    esp_chip_info(&chip_info);
-    printf("This is %s chip with %d CPU core(s), WiFi%s%s, ",
-           CONFIG_IDF_TARGET,
-           chip_info.cores,
-           (chip_info.features & CHIP_FEATURE_BT) ? "/BT" : "",
-           (chip_info.features & CHIP_FEATURE_BLE) ? "/BLE" : "");
+		i2s_std_config_t std_config = {
+				.clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(44100),
+				.slot_cfg = I2S_STD_PHILIP_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
+				.gpio_cfg = {
+						.mclk = GPIO_NUM_0,
+						.bclk = GPIO_NUM_25,
+						.ws = GPIO_NUM_26,
+						.dout = GPIO_NUM_27,
+						.din = I2S_GPIO_UNUSED,
+						.invert_flags = {
+								.mclk_inv = false,
+								.bclk_inv = false,
+								.ws_inv = false
+						}
+				}
+		};
+		ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_channel_handle, &std_config));
+		ESP_ERROR_CHECK(i2s_channel_enable(tx_channel_handle));
 
-    unsigned major_rev = chip_info.revision / 100;
-    unsigned minor_rev = chip_info.revision % 100;
-    printf("silicon revision v%d.%d, ", major_rev, minor_rev);
-    if(esp_flash_get_size(NULL, &flash_size) != ESP_OK) {
-        printf("Get flash size failed");
-        return;
-    }
-
-    printf("%luMB %s flash\n", flash_size / (1024 * 1024),
-           (chip_info.features & CHIP_FEATURE_EMB_FLASH) ? "embedded" : "external");
-
-    printf("Minimum free heap size: %ld bytes\n", esp_get_minimum_free_heap_size());
-
-    for (int i = 10; i >= 0; i--) {
-        printf("Restarting in %d seconds...\n", i);
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-    }
-    printf("Restarting now.\n");
-    fflush(stdout);
-    esp_restart();
+		const int SAMPLE_LENGTH = 4;
+		int16_t* buffer = (int16_t*)calloc(sizeof(int16_t), SAMPLE_LENGTH);
+		for (int i = 0; i < SAMPLE_LENGTH; ++i) {
+				buffer[i] = (i & 1) ? 0x8000 + i : i;
+		}
+		for (;;) {
+				size_t written_bytes = 0;
+				const uint32_t TIMEOUT_MS = 1000; 
+				ESP_ERROR_CHECK(i2s_channel_write(tx_channel_handle, buffer,
+						SAMPLE_LENGTH * sizeof(int16_t), &written_bytes, TIMEOUT_MS));
+		}
 }
